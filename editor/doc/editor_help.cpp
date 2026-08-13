@@ -215,6 +215,26 @@ static String _contextualize_class_specifier(const String &p_class_specifier, co
 	return p_class_specifier.substr(p_edited_class.length() + 1);
 }
 
+static void _resolve_doc_member_link(const String &p_link, const String &p_current_class, String &r_class_name, String &r_member_name) {
+	r_class_name = p_current_class;
+	r_member_name = p_link;
+
+	const String current_class_prefix = p_current_class + ".";
+	if (p_link.begins_with(current_class_prefix)) {
+		r_member_name = p_link.substr(current_class_prefix.length());
+		return;
+	}
+
+	for (int dot_pos = p_link.find_char('.'); dot_pos >= 0; dot_pos = p_link.find_char('.', dot_pos + 1)) {
+		const String class_name = p_link.left(dot_pos);
+		if (EditorHelp::has_doc(class_name)) {
+			r_class_name = class_name;
+			r_member_name = p_link.substr(dot_pos + 1);
+			return;
+		}
+	}
+}
+
 /// EditorHelp ///
 
 void EditorHelp::_update_theme_item_cache() {
@@ -380,8 +400,10 @@ void EditorHelp::_class_desc_select(const String &p_select) {
 			}
 
 			if (link.contains_char('.')) {
-				const int class_end = link.rfind_char('.');
-				emit_signal(SNAME("go_to_help"), topic + ":" + link.left(class_end) + ":" + link.substr(class_end + 1));
+				String member_class_name;
+				String member_name;
+				_resolve_doc_member_link(link, edited_class, member_class_name, member_name);
+				emit_signal(SNAME("go_to_help"), topic + ":" + member_class_name + ":" + member_name);
 			}
 		}
 	} else if (p_select.begins_with("http:") || p_select.begins_with("https:")) {
@@ -1820,7 +1842,14 @@ void EditorHelp::_update_doc() {
 					}
 
 					// Add the enum constant line to the constant_line map so we can locate it as a constant.
-					constant_line[enum_value.name] = class_desc->get_paragraph_count() - 2;
+					const int enum_value_line = class_desc->get_paragraph_count() - 2;
+					constant_line[enum_value.name] = enum_value_line;
+					if (key != "@unnamed_enums") {
+						// Named enum values can be referenced as `Enum.VALUE` or `Class.Enum.VALUE`.
+						constant_line[key + "." + enum_value.name] = enum_value_line;
+						constant_line[E.key + "." + enum_value.name] = enum_value_line;
+						constant_line[cd.name + "." + key + "." + enum_value.name] = enum_value_line;
+					}
 
 					class_desc->push_indent(1);
 
@@ -4432,12 +4461,10 @@ void EditorHelpBit::_meta_clicked(const String &p_select) {
 			}
 		}
 
-		if (link.contains_char('.')) {
-			const int class_end = link.rfind_char('.');
-			_go_to_help(topic + ":" + link.left(class_end) + ":" + link.substr(class_end + 1));
-		} else {
-			_go_to_help(topic + ":" + symbol_class_name + ":" + link);
-		}
+		String member_class_name;
+		String member_name;
+		_resolve_doc_member_link(link, symbol_class_name, member_class_name, member_name);
+		_go_to_help(topic + ":" + member_class_name + ":" + member_name);
 	} else if (p_select.begins_with("open-file:")) {
 		String path = ProjectSettings::get_singleton()->globalize_path(p_select.trim_prefix("open-file:"));
 		OS::get_singleton()->shell_show_in_file_manager(path, true);
